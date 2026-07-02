@@ -307,6 +307,12 @@ class OpenAIChatCompletion(io.ComfyNode):
                     tooltip="调试模式：在控制台打印 HTTP 请求和响应",
                     default=False,
                 ),
+                io.Boolean.Input(
+                    id="passthrough",
+                    display_name="Passthrough",
+                    tooltip="绕过 API 调用，直接将提示词透传到 content 输出",
+                    default=False,
+                ),
             ],
             outputs=[
                 io.String.Output(
@@ -348,7 +354,12 @@ class OpenAIChatCompletion(io.ComfyNode):
                 force_regen: bool = False,
                 enable_thinking: bool = False,
                 debug_mode: bool = False,
+                passthrough: bool = False,
                 ) -> io.NodeOutput:
+        # Passthrough 模式：跳过 API 调用，直接透传提示词
+        if passthrough:
+            return io.NodeOutput(prompt, prompt)
+        
         # 验证必要参数
         if not model or (isinstance(model, str) and model.strip() == ""):
             raise Exception("错误：必须指定模型名称\n请检查模型输入是否已正确连接")
