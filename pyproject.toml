@@ -1,0 +1,16 @@
+[project]
+name = "comfyui-openai-chat"
+description = "OpenAI API 兼容的聊天补全节点，支持文本和图片输入，思考模式"
+version = "1.0.0"
+license = { file = "LICENSE" }
+dependencies = [
+    "numpy>=1.25.0",
+    "Pillow",
+]
+
+[project.urls]
+Repository = "https://github.com/comfyui-openai-chat"
+
+[tool.comfy]
+PublisherId = "comfyui"
+DisplayName = "OpenAI Chat Completion"
