@@ -32,6 +32,7 @@
 | Force Regen | Boolean | `False` | 强制重新生成（禁用缓存） |
 | Enable Thinking | Boolean | `False` | 启用思考模式 |
 | Debug Mode | Boolean | `False` | 在控制台打印 HTTP 请求和响应 |
+| Passthrough | Boolean | `False` | 绕过 API 调用，直接将提示词透传到 content 输出 |
 
 ### 高级参数（需启用 Enable Advanced Params）
 | 参数 | 类型 | 默认值 | 范围 | 说明 |
@@ -63,6 +64,14 @@
 ### 工作原理
 - `force_regen=False`：返回输入内容的哈希作为缓存键，相同输入使用缓存
 - `force_regen=True`：返回时间戳作为缓存键，强制重新生成
+
+## Passthrough 模式
+
+启用 `Passthrough` 后，节点跳过 API 调用，直接将 `Prompt` 内容原样输出到 `Content` 和 `Full Content`。
+适用于：
+- 临时调试工作流
+- 需要保持连接但不想调用 API
+- 作为 bypass 替代方案（即使节点被执行，也不会产生 API 费用）
 
 ## 思考模式
 
