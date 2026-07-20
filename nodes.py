@@ -187,6 +187,17 @@ class OpenAIChatCompletion(io.ComfyNode):
                     optional=True,
                     tooltip="可选的图像输入",
                 ),
+                # 种子
+                io.Int.Input(
+                    id="seed",
+                    display_name="Seed",
+                    default=42,
+                    min=0,
+                    max=2147483647,
+                    control_after_generate=True,
+                    tooltip="随机种子",
+                    display_mode=io.NumberDisplay.number,
+                ),
                 # 高级参数
                 io.DynamicCombo.Input(
                     id="enable_advanced_params",
@@ -204,16 +215,6 @@ class OpenAIChatCompletion(io.ComfyNode):
                                     min=0.0,
                                     max=2.0,
                                     step=0.1,
-                                    display_mode=io.NumberDisplay.number,
-                                ),
-                                io.Int.Input(
-                                    id="seed",
-                                    display_name="Seed",
-                                    tooltip="随机种子",
-                                    default=42,
-                                    min=0,
-                                    max=2147483647,
-                                    control_after_generate=False,
                                     display_mode=io.NumberDisplay.number,
                                 ),
                                 io.Int.Input(
@@ -350,6 +351,7 @@ class OpenAIChatCompletion(io.ComfyNode):
                 api_key: str | None = None,
                 system_prompt: str | None = None,
                 images: list[torch.Tensor] | None = None,
+                seed: int = 42,
                 enable_advanced_params: dict | None = None,
                 force_regen: bool = False,
                 enable_thinking: bool = False,
@@ -371,7 +373,6 @@ class OpenAIChatCompletion(io.ComfyNode):
         
         # 提取高级参数值，如果未启用则使用默认值
         temperature = enable_advanced_params.get("temperature", 1.0) if enabled else None
-        seed = enable_advanced_params.get("seed", 42) if enabled else None
         top_k = enable_advanced_params.get("top_k", 0) if enabled else None
         top_p = enable_advanced_params.get("top_p", 1.0) if enabled else None
         min_p = enable_advanced_params.get("min_p", 0.0) if enabled else None
@@ -442,12 +443,13 @@ class OpenAIChatCompletion(io.ComfyNode):
             "n": 1,
         }
         
-        # 仅在启用高级参数时传递温度、种子、max_tokens、top_p、presence_penalty
+        # seed 始终传递
+        api_kwargs["seed"] = seed
+
+        # 仅在启用高级参数时传递温度、max_tokens、top_p、presence_penalty
         if enabled:
             if temperature is not None:
                 api_kwargs["temperature"] = temperature
-            if seed is not None:
-                api_kwargs["seed"] = seed
             if max_tokens is not None:
                 api_kwargs["max_tokens"] = max_tokens
             if top_p is not None:
