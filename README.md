@@ -29,7 +29,6 @@
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | Enable Advanced Params | Combo | `禁用` | 启用/禁用高级参数 |
-| Force Regen | Boolean | `False` | 强制重新生成（禁用缓存） |
 | Enable Thinking | Boolean | `False` | 启用思考模式 |
 | Debug Mode | Boolean | `False` | 在控制台打印 HTTP 请求和响应 |
 | Passthrough | Boolean | `False` | 绕过 API 调用，直接将提示词透传到 content 输出 |
@@ -45,7 +44,6 @@
 | Max Tokens | Int | `512` | 1–1000000 | 最大输出 token 数 |
 | Repetition Penalty | Float | `1.0` | 0.0–5.0 | 重复惩罚 |
 | Presence Penalty | Float | `0.0` | -2.0–2.0 | 存在惩罚 |
-| Thinking Tag | String | `` ``` `` | - | 思考标签模式，用于提取思考内容 |
 
 ## 输出参数
 
@@ -59,11 +57,9 @@
 节点内置智能缓存机制：
 
 - **默认行为**：当输入参数不变时，使用上次结果，不重新调用 API
-- **强制重新生成**：启用 `Force Regen` 开关时，每次都会重新调用 API
 
 ### 工作原理
-- `force_regen=False`：返回输入内容的哈希作为缓存键，相同输入使用缓存
-- `force_regen=True`：返回时间戳作为缓存键，强制重新生成
+- 返回输入内容的哈希作为缓存键，相同输入使用缓存
 
 ## Passthrough 模式
 
@@ -86,7 +82,6 @@
 
 - **DeepSeek / Qwen3**: `<think>\n...\n</think>`
 - **Claude**: `</think>\n...\n</think>`
-- **自定义标签**: 通过高级参数中的 `Thinking Tag` 配置
 
 ## 使用示例
 

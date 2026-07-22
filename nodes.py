@@ -1,10 +1,8 @@
 import base64
 import json
 import re
-import time
 import urllib.request
 import urllib.error
-import urllib.parse
 from io import BytesIO
 from typing import Any
 
@@ -12,7 +10,7 @@ import torch
 import numpy as np
 from PIL import Image
 
-from comfy_api.latest import io, ui
+from comfy_api.latest import io
 
 
 def comfy_image_to_base64_png_url(image: torch.Tensor) -> str:
@@ -25,7 +23,7 @@ def comfy_image_to_base64_png_url(image: torch.Tensor) -> str:
     return f"data:image/png;base64,{b64_png.decode('utf-8')}"
 
 
-def extract_thinking_content(content: str, pattern: str = "```") -> tuple[str, str]:
+def extract_thinking_content(content: str) -> tuple[str, str]:
     """
     从模型响应中提取思考内容
     
@@ -275,12 +273,6 @@ class OpenAIChatCompletion(io.ComfyNode):
                                     step=0.1,
                                     display_mode=io.NumberDisplay.number,
                                 ),
-                                io.String.Input(
-                                    id="thinking_tag",
-                                    display_name="Thinking Tag",
-                                    tooltip="思考标签模式，用于提取思考内容",
-                                    default="```",
-                                ),
                             ]
                         ),
                         io.DynamicCombo.Option(
@@ -290,12 +282,6 @@ class OpenAIChatCompletion(io.ComfyNode):
                     ],
                 ),
                 # 选项
-                io.Boolean.Input(
-                    id="force_regen",
-                    display_name="Force Regen",
-                    tooltip="强制重新生成（禁用缓存）",
-                    default=False,
-                ),
                 io.Boolean.Input(
                     id="enable_thinking",
                     display_name="Enable Thinking",
@@ -332,16 +318,9 @@ class OpenAIChatCompletion(io.ComfyNode):
     @classmethod
     def fingerprint_inputs(cls, **kwargs) -> str:
         """
-        控制节点缓存行为
-        - force_regen=True 时返回时间戳，强制重新生成
-        - 否则返回输入内容的哈希，相同输入使用缓存结果
+        控制节点缓存行为：根据输入参数哈希决定是否使用缓存
         """
-        if kwargs.get("force_regen"):
-            return str(time.time())  # 使用时间戳强制刷新
-        else:
-            # 移除 force_regen 后序列化剩余输入作为缓存键
-            kwargs.pop("force_regen", None)
-            return json.dumps(kwargs, sort_keys=True, separators=(",", ":"))
+        return json.dumps(kwargs, sort_keys=True, separators=(",", ":"))
 
     @classmethod
     def execute(cls,
@@ -353,7 +332,6 @@ class OpenAIChatCompletion(io.ComfyNode):
                 images: list[torch.Tensor] | None = None,
                 seed: int = 42,
                 enable_advanced_params: dict | None = None,
-                force_regen: bool = False,
                 enable_thinking: bool = False,
                 debug_mode: bool = False,
                 passthrough: bool = False,
@@ -379,7 +357,6 @@ class OpenAIChatCompletion(io.ComfyNode):
         max_tokens = enable_advanced_params.get("max_tokens", 512) if enabled else None
         repetition_penalty = enable_advanced_params.get("repetition_penalty", 1.0) if enabled else None
         presence_penalty = enable_advanced_params.get("presence_penalty", 0.0) if enabled else None
-        thinking_tag = enable_advanced_params.get("thinking_tag", "```") if enabled else "```"
         # 构建消息
         messages = []
         
@@ -498,9 +475,9 @@ class OpenAIChatCompletion(io.ComfyNode):
             full_content = response_content + "\n\n" + reasoning_content if response_content else reasoning_content
             cleaned_content = response_content
         else:
-            # 否则从 content 中提取思考内容（支持 thinking 标签格式）
+            # 从 content 中提取思考内容（支持 thinking 标签格式）
+            cleaned_content, _ = extract_thinking_content(response_content)
             full_content = response_content
-            cleaned_content = response_content
         
         # 返回两个输出：content, full_content
         return io.NodeOutput(
