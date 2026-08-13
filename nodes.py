@@ -3,6 +3,7 @@ import json
 import re
 import urllib.request
 import urllib.error
+import wave
 from io import BytesIO
 from typing import Any
 
@@ -10,7 +11,25 @@ import torch
 import numpy as np
 from PIL import Image
 
-from comfy_api.latest import io
+from comfy_api.latest import io, ui
+
+
+def comfy_audio_to_base64_wav(audio: dict, index: int = 0) -> str:
+    """将 ComfyUI 音频 dict 中的单个样本转换为 base64 WAV 字符串"""
+    waveform = audio["waveform"]  # [B, C, T]
+    sample_rate = int(audio["sample_rate"])
+    samples = waveform[index].cpu().numpy()  # [C, T]
+    # 转换为 16-bit PCM，并排列为 [T, C] interleaved
+    pcm = np.clip(samples * 32767.0, -32768.0, 32767.0).astype(np.int16)
+    pcm = np.ascontiguousarray(pcm.T)
+    buffer = BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(pcm.shape[1])
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(pcm.tobytes())
+    b64_wav = base64.b64encode(buffer.getvalue())
+    return b64_wav.decode('utf-8')
 
 
 def comfy_image_to_base64_png_url(image: torch.Tensor) -> str:
@@ -185,6 +204,13 @@ class OpenAIChatCompletion(io.ComfyNode):
                     optional=True,
                     tooltip="可选的图像输入",
                 ),
+                # 音频输入
+                io.Audio.Input(
+                    id="audio",
+                    display_name="Audio",
+                    optional=True,
+                    tooltip="可选的音频输入（以 WAV 格式发送给 API）",
+                ),
                 # 种子
                 io.Int.Input(
                     id="seed",
@@ -330,6 +356,7 @@ class OpenAIChatCompletion(io.ComfyNode):
                 api_key: str | None = None,
                 system_prompt: str | None = None,
                 images: list[torch.Tensor] | None = None,
+                audio: dict | None = None,
                 seed: int = 42,
                 enable_advanced_params: dict | None = None,
                 enable_thinking: bool = False,
@@ -368,16 +395,27 @@ class OpenAIChatCompletion(io.ComfyNode):
             })
         
         # 构建用户消息
-        if images is not None and len(images) > 0:
+        has_multimodal = (images is not None and len(images) > 0) or audio is not None
+        if has_multimodal:
             # 多模态消息
             content = []
-            for image in images:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": comfy_image_to_base64_png_url(image)
-                    }
-                })
+            if images is not None and len(images) > 0:
+                for image in images:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": comfy_image_to_base64_png_url(image)
+                        }
+                    })
+            if audio is not None:
+                for i in range(audio["waveform"].shape[0]):
+                    content.append({
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": comfy_audio_to_base64_wav(audio, i),
+                            "format": "wav",
+                        }
+                    })
             content.append({
                 "type": "text",
                 "text": prompt
@@ -484,3 +522,139 @@ class OpenAIChatCompletion(io.ComfyNode):
             cleaned_content,
             full_content,
         )
+
+
+class OpenAITextEditor(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="OpenAITextEditor",
+            display_name="Editable Text",
+            category="OpenAI",
+            search_aliases=["text editor", "editable", "show text", "编辑文本"],
+            description="展示输入的文本并允许直接编辑，输出编辑后的文本",
+            inputs=[
+                io.String.Input(
+                    id="text",
+                    display_name="Text",
+                    tooltip="可编辑的文本：执行后自动显示输入文本，可直接修改",
+                    multiline=True,
+                    optional=True,
+                    socketless=True,
+                    default="",
+                ),
+                io.String.Input(
+                    id="text_in",
+                    display_name="Text Input",
+                    tooltip="输入的文本，执行后显示到上方编辑框中",
+                    optional=True,
+                    force_input=True,
+                ),
+                # 内部输入：记录用户手动编辑的内容（前端隐藏该输入并自动同步）
+                io.String.Input(
+                    id="text_user",
+                    display_name="User Edited Text",
+                    tooltip="用户手动编辑的内容（由前端自动维护，不可见）",
+                    multiline=True,
+                    optional=True,
+                    socketless=True,
+                    default="",
+                ),
+                # 内部输入：记录用户编辑时的输入内容，用于判断输入是否已变化（前端隐藏）
+                io.String.Input(
+                    id="text_base",
+                    display_name="User Edit Base",
+                    tooltip="用户编辑时的输入内容（由前端自动维护，不可见）",
+                    multiline=True,
+                    optional=True,
+                    socketless=True,
+                    default="",
+                ),
+            ],
+            outputs=[
+                io.String.Output(
+                    id="text_out",
+                    display_name="Text",
+                    tooltip="编辑后的文本；编辑框为空时透传输入文本",
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, text: str | None = None, text_in: str | None = None, text_user: str | None = None, text_base: str | None = None) -> io.NodeOutput:
+        # text_user/text_base 由前端维护：text_user 为用户编辑内容，text_base 为编辑时的输入。
+        # 仅当编辑时的输入与当前输入一致时编辑内容才有效；输入变化时透传新输入（立即生效）
+        if text_in is None:
+            # 未连接输入：编辑框是唯一来源
+            value = text_user or ""
+        else:
+            base = text_base or ""
+            value = text_user if (text_user and base == text_in) else text_in
+        # 有输入文本时通过 ui 通知前端刷新编辑框（web/openai_nodes.js）
+        if text_in is not None:
+            return io.NodeOutput(value, ui=ui.PreviewText(text_in))
+        return io.NodeOutput(value)
+
+
+def value_to_text(value: Any) -> str:
+    """将任意类型的输入值转换为文本"""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    if isinstance(value, torch.Tensor):
+        return f"tensor(shape={tuple(value.shape)}, dtype={value.dtype})"
+    return str(value)
+
+
+class OpenAITextConcat(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="OpenAITextConcat",
+            display_name="Text Concat",
+            category="OpenAI",
+            search_aliases=["concatenate", "join", "text join", "拼接", "文本拼接"],
+            description="多个文本输入按自定义分隔符拼接输出；连接到最后一个输入会自动新增输入",
+            inputs=[
+                io.String.Input(
+                    id="separator",
+                    display_name="Separator",
+                    tooltip="拼接分隔符，\\n 表示换行、\\t 表示制表符",
+                    default=", ",
+                ),
+                io.Autogrow.Input(
+                    id="texts",
+                    display_name="Texts",
+                    template=io.Autogrow.TemplatePrefix(
+                        input=io.AnyType.Input(id="text", optional=True),
+                        prefix="text_",
+                        min=1,
+                        max=20,
+                    ),
+                    optional=True,
+                    tooltip="任意类型输入，转换为文本后按顺序拼接；连接到最后一个输入会自动新增",
+                ),
+            ],
+            outputs=[
+                io.String.Output(
+                    id="text",
+                    display_name="Text",
+                    tooltip="所有输入按分隔符拼接后的文本",
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, separator: str = ", ", texts: dict[str, Any] | None = None) -> io.NodeOutput:
+        # 转换分隔符中的转义序列（\\n 换行、\\t 制表符、\\r 回车）
+        separator = separator.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
+        if not texts:
+            return io.NodeOutput("")
+        # texts: {text_0: ..., text_1: ...}，按编号顺序拼接，跳过空值
+        ordered = [
+            value_to_text(texts[key])
+            for key in sorted(texts, key=lambda k: int(k.rsplit("_", 1)[1]))
+            if texts[key] is not None
+        ]
+        return io.NodeOutput(separator.join(text for text in ordered if text))
